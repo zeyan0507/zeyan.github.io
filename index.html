@@ -48,7 +48,7 @@
             animation: pulseText 3s infinite alternate;
         }
 
-        @media (max-width: 1000px) {
+        @media (max-width: 768px) {
             .greeting-3d {
                 top: 15%;       /* Slightly lower from top */
                 left: 5%;       /* Move to left side */
@@ -119,7 +119,7 @@
     <!-- Removed static greeting div -->
     <button id="music-btn">♫</button>
     <audio id="bgm" loop>
-        <source src="./try/music/bgm2.mp3" type="audio/mpeg">
+        <source src="./music/bgm2.mp3" type="audio/mpeg">
         <!-- Fallback if local file fails or doesn't exist -->
         <source src="https://music.163.com/song/media/outer/url?id=4875306.mp3" type="audio/mpeg">
     </audio>
@@ -149,6 +149,7 @@
         import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
         import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
         import { CSS3DRenderer, CSS3DSprite } from 'three/addons/renderers/CSS3DRenderer.js';
+        import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
 
         // --- Configuration ---
         const CONFIG = {
@@ -167,11 +168,13 @@
         const clock = new THREE.Clock();
         let snowSystem;
         let treeGroup;
+        let envMapReady = false;
+        const textures = {};
 
         init();
         animate();
 
-        function init() {
+        async function init() {
             // 1. Scene Setup
             scene = new THREE.Scene();
             scene.background = new THREE.Color(CONFIG.bgColor);
@@ -246,6 +249,10 @@
             rimLight.penumbra = 1;
             scene.add(rimLight);
 
+            // 6.5 Environment (HDR from PolyHaven, CC0)
+            await loadEnvironment();
+            createProceduralTextures();
+
             // 7. Create Objects
             createProceduralTree();
             createSnow();
@@ -259,6 +266,75 @@
             setTimeout(() => {
                 document.getElementById('loading').style.opacity = 0;
             }, 1000);
+        }
+
+        async function loadEnvironment() {
+            try {
+                const pmrem = new THREE.PMREMGenerator(renderer);
+                pmrem.compileEquirectangularShader();
+
+                // Soft indoor studio lighting, great for metals (CC0)
+                const exrURL = 'https://dl.polyhaven.org/file/ph-assets/HDRIs/exr/4k/studio_small_08_4k.exr';
+                const exrLoader = new EXRLoader();
+                const exrTex = await exrLoader.loadAsync(exrURL);
+                exrTex.mapping = THREE.EquirectangularReflectionMapping;
+
+                const envRT = pmrem.fromEquirectangular(exrTex);
+                exrTex.dispose();
+                scene.environment = envRT.texture;
+                envMapReady = true;
+            } catch (e) {
+                console.warn('HDR 环境加载失败，继续使用普通灯光:', e);
+            }
+        }
+
+        function createProceduralTextures() {
+            // Orange peel bump (grayscale dots)
+            const orangeCanvas = document.createElement('canvas');
+            orangeCanvas.width = 256; orangeCanvas.height = 256;
+            const octx = orangeCanvas.getContext('2d');
+            octx.fillStyle = '#808080';
+            octx.fillRect(0, 0, 256, 256);
+            for (let i = 0; i < 8000; i++) {
+                const x = Math.random() * 256;
+                const y = Math.random() * 256;
+                const r = Math.random() * 0.9 + 0.2;
+                const shade = Math.floor(118 + Math.random() * 20);
+                octx.fillStyle = `rgb(${shade},${shade},${shade})`;
+                octx.beginPath();
+                octx.arc(x, y, r, 0, Math.PI * 2);
+                octx.fill();
+            }
+            const orangeBump = new THREE.CanvasTexture(orangeCanvas);
+            orangeBump.wrapS = orangeBump.wrapT = THREE.RepeatWrapping;
+            orangeBump.repeat.set(3, 3);
+            textures.orangeBump = orangeBump;
+
+            // Brushed metal roughness & bump (vertical streaks)
+            const metalCanvas = document.createElement('canvas');
+            metalCanvas.width = 256; metalCanvas.height = 256;
+            const mctx = metalCanvas.getContext('2d');
+            const grd = mctx.createLinearGradient(0, 0, 256, 0);
+            grd.addColorStop(0, '#999');
+            grd.addColorStop(1, '#aaa');
+            mctx.fillStyle = grd;
+            mctx.fillRect(0, 0, 256, 256);
+            for (let x = 0; x < 256; x++) {
+                const v = 150 + Math.floor((Math.sin(x * 0.35) * 8) + (Math.random() * 18 - 9));
+                mctx.strokeStyle = `rgb(${v},${v},${v})`;
+                mctx.beginPath();
+                mctx.moveTo(x + 0.5, 0);
+                mctx.lineTo(x + 0.5, 256);
+                mctx.stroke();
+            }
+            const brushedRough = new THREE.CanvasTexture(metalCanvas);
+            brushedRough.wrapS = brushedRough.wrapT = THREE.RepeatWrapping;
+            brushedRough.repeat.set(1, 4);
+            textures.brushedRough = brushedRough;
+            const brushedBump = new THREE.CanvasTexture(metalCanvas);
+            brushedBump.wrapS = brushedBump.wrapT = THREE.RepeatWrapping;
+            brushedBump.repeat.set(1, 4);
+            textures.brushedBump = brushedBump;
         }
 
         function create3DText() {
@@ -396,10 +472,12 @@
             const orangeGeo = new THREE.SphereGeometry(0.6, 32, 32);
             const orangeMat = new THREE.MeshStandardMaterial({ 
                 color: 0xff8800, // More natural orange
-                roughness: 0.8,  // Rough texture like orange peel
+                roughness: 0.82,  // Rough texture like orange peel
                 metalness: 0.0,  // Not metallic
                 emissive: 0xff4400, 
-                emissiveIntensity: 0.3 // Reduced glow to show shape/shading
+                emissiveIntensity: 0.22,
+                bumpMap: textures.orangeBump || null,
+                bumpScale: 0.05
             });
             const orangeMesh = new THREE.Mesh(orangeGeo, orangeMat);
             orangeMesh.scale.set(1, 0.92, 1); // Slightly squashed shape
@@ -427,23 +505,41 @@
 
             // 2. Create Bell Template (3D)
             const bellTemplate = new THREE.Group();
-            // Bell Body
-            const bellMat = new THREE.MeshStandardMaterial({ 
-                color: 0xffd700, 
-                metalness: 1.0, 
-                roughness: 0.1, // Slightly rougher to catch highlights better
-                emissive: 0xffdd00, 
-                emissiveIntensity: 0.8, // [ADJUST HERE] Brightness: 0.0 (Dark) to 2.0 (Very Bright)
+            // Bell Body via LatheGeometry (more realistic silhouette)
+            const bellProfile = [];
+            const h = 0.9;
+            bellProfile.push(new THREE.Vector2(0.02, 0.0));
+            bellProfile.push(new THREE.Vector2(0.08, 0.02));
+            bellProfile.push(new THREE.Vector2(0.10, 0.06));
+            bellProfile.push(new THREE.Vector2(0.12, 0.12));
+            bellProfile.push(new THREE.Vector2(0.40, h * 0.72));
+            bellProfile.push(new THREE.Vector2(0.48, h * 0.90));
+            bellProfile.push(new THREE.Vector2(0.46, h));
+            const bellGeo = new THREE.LatheGeometry(bellProfile, 64);
+            const bellMat = new THREE.MeshPhysicalMaterial({ 
+                color: 0xffd700,
+                metalness: 1.0,
+                roughness: 0.22,
+                roughnessMap: textures.brushedRough || null,
+                bumpMap: textures.brushedBump || null,
+                bumpScale: 0.02,
+                envMapIntensity: 1.0,
                 side: THREE.DoubleSide
             });
-            const bellGeo = new THREE.CylinderGeometry(0.1, 0.5, 0.8, 32, 1, true);
             const bellBody = new THREE.Mesh(bellGeo, bellMat);
-            bellBody.position.y = -0.2;
+            bellBody.rotation.x = Math.PI; // Flip so wide part is down
+            bellBody.position.y = 0;
             bellTemplate.add(bellBody);
+            // Top ring
+            const ringGeo = new THREE.TorusGeometry(0.08, 0.02, 12, 32);
+            const ring = new THREE.Mesh(ringGeo, bellMat);
+            ring.rotation.x = Math.PI / 2;
+            ring.position.y = 0.05;
+            bellTemplate.add(ring);
             // Clapper
-            const clapperGeo = new THREE.SphereGeometry(0.15);
+            const clapperGeo = new THREE.SphereGeometry(0.12, 24, 24);
             const clapper = new THREE.Mesh(clapperGeo, bellMat);
-            clapper.position.y = -0.6;
+            clapper.position.y = -0.55;
             bellTemplate.add(clapper);
 
             // 3. Fairy Lights (Sparkles) - High Intensity
