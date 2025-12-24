@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cinematic Orange Christmas Tree</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&family=Great+Vibes&display=swap" rel="stylesheet">
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #050202; }
+        canvas { display: block; }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ff8800;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 24px;
+            pointer-events: none;
+            text-transform: uppercase;
+            letter-spacing: 4px;
+            text-shadow: 0 0 10px #ff4400;
+            transition: opacity 1s ease;
+        }
+
+        /* 3D Text Styles */
+        .greeting-3d {
+            pointer-events: none;
+            font-family: 'Great Vibes', cursive;
+            color: #ffffff;
+            text-align: center;
+            line-height: 1.2;
+            /* Multi-layered shadow for "Cinematic/Magical" glow */
+            text-shadow: 
+                0 0 5px #fff,
+                0 0 10px #ffdd00,
+                0 0 20px #ffaa00,
+                0 0 40px #ff8800;
+            animation: pulseText 3s infinite alternate;
+        }
+
+        @keyframes pulseText {
+            0% { 
+                opacity: 0.85; 
+                transform: scale(1);
+                text-shadow: 0 0 5px #fff, 0 0 10px #ffdd00, 0 0 20px #ffaa00; 
+            }
+            100% { 
+                opacity: 1; 
+                transform: scale(1.05);
+                text-shadow: 0 0 10px #fff, 0 0 20px #ffdd00, 0 0 40px #ffaa00, 0 0 80px #ff8800; 
+            }
+        }
+        
+        /* Music Button */
+        #music-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: rgba(255, 136, 0, 0.2);
+            border: 2px solid #ffaa00;
+            color: #ffaa00;
+            font-size: 24px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            z-index: 100;
+            box-shadow: 0 0 10px #ff4400;
+        }
+        #music-btn:hover {
+            background: rgba(255, 136, 0, 0.5);
+            box-shadow: 0 0 20px #ff4400;
+            transform: scale(1.1);
+        }
+        .music-playing {
+            animation: spin 4s linear infinite;
+        }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+    </style>
+    <!-- Import maps polyfill -->
+    <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="loading">Loading Experience...</div>
+    <!-- Removed static greeting div -->
+    <button id="music-btn">♫</button>
+    <audio id="bgm" loop>
+        <source src="./try/music/bgm2.mp3" type="audio/mpeg">
+        <!-- Fallback if local file fails or doesn't exist -->
+        <source src="https://music.163.com/song/media/outer/url?id=4875306.mp3" type="audio/mpeg">
+    </audio>
+
+    <script type="module">
+        // Music Control
+        const musicBtn = document.getElementById('music-btn');
+        const bgm = document.getElementById('bgm');
+        let isPlaying = false;
+
+        musicBtn.addEventListener('click', () => {
+            if (isPlaying) {
+                bgm.pause();
+                musicBtn.classList.remove('music-playing');
+                musicBtn.innerHTML = '♫';
+            } else {
+                bgm.play().catch(e => console.log("Audio play failed:", e));
+                musicBtn.classList.add('music-playing');
+                musicBtn.innerHTML = '❚❚';
+            }
+            isPlaying = !isPlaying;
+        });
+
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import { CSS3DRenderer, CSS3DSprite } from 'three/addons/renderers/CSS3DRenderer.js';
+
+        // --- Configuration ---
+        const CONFIG = {
+            treeColor: 0xff6600, // Deep Orange
+            glowColor: 0xffaa00,
+            bgColor: 0x050202,
+            particleCount: 3000, // Increased for density
+            snowCount: 2000,
+            treeHeight: 40,
+            treeRadius: 15
+        };
+
+        // --- Globals ---
+        let scene, camera, renderer, labelRenderer, composer, controls;
+        let time = 0;
+        const clock = new THREE.Clock();
+        let snowSystem;
+        let treeGroup;
+
+        init();
+        animate();
+
+        function init() {
+            // 1. Scene Setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(CONFIG.bgColor);
+            scene.fog = new THREE.FogExp2(CONFIG.bgColor, 0.02);
+
+            // 2. Camera
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            // Moved camera back (z=80) and up (y=25) to frame the whole tree better
+            camera.position.set(0, 25, 80);
+
+            // 3. Renderer (WebGL)
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.toneMapping = THREE.ReinhardToneMapping;
+            document.body.appendChild(renderer.domElement);
+
+            // 3.1 Renderer (CSS3D - For Text)
+            labelRenderer = new CSS3DRenderer();
+            labelRenderer.setSize(window.innerWidth, window.innerHeight);
+            labelRenderer.domElement.style.position = 'absolute';
+            labelRenderer.domElement.style.top = '0';
+            labelRenderer.domElement.style.pointerEvents = 'none'; // Let clicks pass through to WebGL
+            document.body.appendChild(labelRenderer.domElement);
+
+            // 4. Post-processing (Bloom)
+            const renderScene = new RenderPass(scene, camera);
+            // Adjusted for a softer, more "magical" glow rather than harsh neon
+            const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+            bloomPass.threshold = 0.25; // Only very bright things glow
+            bloomPass.strength = 1.0;   // Gentle glow
+            bloomPass.radius = 0.8;     // Wider, softer spread
+
+            composer = new EffectComposer(renderer);
+            composer.addPass(renderScene);
+            composer.addPass(bloomPass);
+
+            // 5. Controls
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.autoRotate = true;
+            controls.autoRotateSpeed = 0.8; 
+            controls.maxPolarAngle = Math.PI / 2 - 0.05;
+            // Focus on the center of the tree (approx height 12) instead of the base (0)
+            // This ensures zooming in keeps the tree in frame
+            controls.target.set(0, 12, 0); 
+            controls.update();
+
+            // 6. Lighting - Harmonized Setup
+            // Ambient: Soft warm grey to ensure dark areas aren't pitch black
+            const ambientLight = new THREE.AmbientLight(0xffeedd, 0.3); 
+            scene.add(ambientLight);
+
+            // Key Light: Warm Golden (Sunlight)
+            const pointLight = new THREE.PointLight(0xffaa00, 3, 100);
+            pointLight.position.set(15, 20, 15);
+            pointLight.castShadow = true;
+            scene.add(pointLight);
+
+            // Fill Light: Soft Purple (Complementary to Orange but subtle)
+            // This adds richness to the shadows without the harsh "Teal" look
+            const fillLight = new THREE.PointLight(0x8844ff, 1.5, 60);
+            fillLight.position.set(-15, 0, 15);
+            scene.add(fillLight);
+
+            // Rim Light: Cool White/Silver (Moonlight)
+            // Defines the edges cleanly
+            const rimLight = new THREE.SpotLight(0xddeeff, 8);
+            rimLight.position.set(0, 50, -30);
+            rimLight.lookAt(0, 0, 0);
+            rimLight.penumbra = 1;
+            scene.add(rimLight);
+
+            // 7. Create Objects
+            createProceduralTree();
+            createSnow();
+            createGround();
+            create3DText(); 
+
+            // 8. Event Listeners
+            window.addEventListener('resize', onWindowResize);
+            
+            // Hide loading
+            setTimeout(() => {
+                document.getElementById('loading').style.opacity = 0;
+            }, 1000);
+        }
+
+        function create3DText() {
+            const div = document.createElement('div');
+            div.className = 'greeting-3d';
+            div.innerHTML = 'Journey beyond,<br>rise above,<br>dwell in joy<br><br><span style="font-size: 0.8em">To 杜</span>';
+            div.style.fontSize = '60px'; // Increased size
+            
+            // Make it a static overlay (HUD style)
+            div.style.position = 'absolute';
+            div.style.top = '25%';
+            div.style.right = '15%';
+            div.style.zIndex = '10'; // Ensure it's above the canvas
+            
+            document.body.appendChild(div);
+        }
+
+        function createProceduralTree() {
+            treeGroup = new THREE.Group();
+            scene.add(treeGroup);
+
+            // --- Trunk (Tree Root) ---
+            const trunkHeight = 12; // Taller trunk
+            const trunkGeo = new THREE.CylinderGeometry(1.5, 3.0, trunkHeight, 16); // Slightly wider base
+            const trunkMat = new THREE.MeshStandardMaterial({ 
+                color: 0xcd853f, // Peru (Lighter wood color)
+                emissive: 0x442200, // Slight warm glow
+                roughness: 0.8,
+                metalness: 0.2
+            });
+            const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+            trunk.position.y = trunkHeight / 2;
+            treeGroup.add(trunk);
+
+            // Container for leaves and ornaments to lift them up
+            const leavesGroup = new THREE.Group();
+            leavesGroup.position.y = trunkHeight - 2; // Overlap slightly
+            treeGroup.add(leavesGroup);
+
+            // --- Inner Volumetric Glow (Soft Light Core) ---
+            // Reduced intensity to let ornaments pop
+            const canvas = document.createElement('canvas');
+            canvas.width = 64; canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+            grad.addColorStop(0, 'rgba(255, 100, 0, 0.15)'); // Dimmer Core
+            grad.addColorStop(0.6, 'rgba(255, 40, 0, 0.05)'); // Fading
+            grad.addColorStop(1, 'rgba(0, 0, 0, 0)'); // Transparent
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 64, 64);
+            const glowTex = new THREE.CanvasTexture(canvas);
+            glowTex.colorSpace = THREE.SRGBColorSpace;
+
+            const glowMat = new THREE.SpriteMaterial({ 
+                map: glowTex, 
+                transparent: true, 
+                depthWrite: false,
+                blending: THREE.AdditiveBlending 
+            });
+
+            // Fill the tree volume with glowing fog
+            for (let i = 0; i < 100; i++) {
+                const sprite = new THREE.Sprite(glowMat);
+                const t = Math.random();
+                const y = t * CONFIG.treeHeight;
+                
+                // Random position inside the cone
+                const maxR = (1 - t) * CONFIG.treeRadius * 0.7; // Keep slightly inside
+                const r = Math.random() * maxR;
+                const angle = Math.random() * Math.PI * 2;
+                
+                sprite.position.set(
+                    Math.cos(angle) * r,
+                    y,
+                    Math.sin(angle) * r
+                );
+                
+                // Scale varies with height (larger at bottom)
+                const scale = (1 - t) * 10 + 5; 
+                sprite.scale.set(scale, scale, 1);
+                leavesGroup.add(sprite);
+            }
+
+            // --- A. The Glowing Spiral Core (The "Leaves") ---
+            // Using InstancedMesh for performance
+            // Octahedron for "Crystal/Gem" look
+            const geometry = new THREE.OctahedronGeometry(0.3, 0); 
+            const material = new THREE.MeshStandardMaterial({
+                color: CONFIG.treeColor,
+                emissive: 0xff4400,
+                emissiveIntensity: 0.4, // Lower emissive to let external lights define shape
+                roughness: 0.3, // Frosted glass look
+                metalness: 0.6, // Semi-metallic
+                transparent: true,
+                opacity: 0.95
+            });
+
+            const particleMesh = new THREE.InstancedMesh(geometry, material, CONFIG.particleCount);
+            const dummy = new THREE.Object3D();
+
+            for (let i = 0; i < CONFIG.particleCount; i++) {
+                // Spiral algorithm
+                const t = i / CONFIG.particleCount;
+                const angle = t * Math.PI * 40 + (Math.random() * 0.5); // Many turns + jitter
+                
+                // Volumetric distribution
+                const maxRadius = (1 - t) * CONFIG.treeRadius;
+                // Distribute particles from 10% to 100% of radius (Fuller volume)
+                const rRatio = 0.1 + 0.9 * Math.sqrt(Math.random()); 
+                const radius = maxRadius * rRatio;
+                
+                const y = t * CONFIG.treeHeight;
+
+                // Add some randomness to make it look organic
+                const randomR = radius + (Math.random() - 0.5) * 1.5;
+                const randomY = y + (Math.random() - 0.5) * 1.5;
+
+                dummy.position.set(
+                    Math.cos(angle) * randomR,
+                    randomY,
+                    Math.sin(angle) * randomR
+                );
+                
+                dummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+                
+                const scale = Math.random() * 1.5 + 0.5;
+                dummy.scale.set(scale, scale, scale);
+
+                dummy.updateMatrix();
+                particleMesh.setMatrixAt(i, dummy.matrix);
+            }
+            leavesGroup.add(particleMesh);
+
+            // --- B. The Ornaments (3D Procedural) ---
+            const ornamentGroup = new THREE.Group();
+            ornamentGroup.name = 'ornamentGroup'; // Name it for easy access
+
+            // 1. Create Orange Template (3D)
+            const orangeTemplate = new THREE.Group();
+            // Fruit body
+            const orangeGeo = new THREE.SphereGeometry(0.6, 32, 32);
+            const orangeMat = new THREE.MeshStandardMaterial({ 
+                color: 0xff8800, // More natural orange
+                roughness: 0.8,  // Rough texture like orange peel
+                metalness: 0.0,  // Not metallic
+                emissive: 0xff4400, 
+                emissiveIntensity: 0.3 // Reduced glow to show shape/shading
+            });
+            const orangeMesh = new THREE.Mesh(orangeGeo, orangeMat);
+            orangeMesh.scale.set(1, 0.92, 1); // Slightly squashed shape
+            orangeTemplate.add(orangeMesh);
+            
+            // Stem
+            const stemGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.3);
+            const stemMat = new THREE.MeshStandardMaterial({ color: 0x336600, roughness: 0.9 });
+            const stem = new THREE.Mesh(stemGeo, stemMat);
+            stem.position.y = 0.55;
+            orangeTemplate.add(stem);
+            
+            // Leaf - Made brighter and larger
+            const leafGeo = new THREE.CircleGeometry(0.3, 3);
+            const leafMat = new THREE.MeshStandardMaterial({ 
+                color: 0x66cc00, // Brighter green
+                roughness: 0.8,
+                side: THREE.DoubleSide
+            });
+            const leaf = new THREE.Mesh(leafGeo, leafMat);
+            leaf.position.set(0.15, 0.55, 0);
+            leaf.rotation.x = -Math.PI / 4;
+            leaf.rotation.z = -Math.PI / 6; // Tilt slightly
+            orangeTemplate.add(leaf);
+
+            // 2. Create Bell Template (3D)
+            const bellTemplate = new THREE.Group();
+            // Bell Body
+            const bellMat = new THREE.MeshStandardMaterial({ 
+                color: 0xffd700, 
+                metalness: 1.0, 
+                roughness: 0.1, // Slightly rougher to catch highlights better
+                emissive: 0xffdd00, 
+                emissiveIntensity: 0.8, // [ADJUST HERE] Brightness: 0.0 (Dark) to 2.0 (Very Bright)
+                side: THREE.DoubleSide
+            });
+            const bellGeo = new THREE.CylinderGeometry(0.1, 0.5, 0.8, 32, 1, true);
+            const bellBody = new THREE.Mesh(bellGeo, bellMat);
+            bellBody.position.y = -0.2;
+            bellTemplate.add(bellBody);
+            // Clapper
+            const clapperGeo = new THREE.SphereGeometry(0.15);
+            const clapper = new THREE.Mesh(clapperGeo, bellMat);
+            clapper.position.y = -0.6;
+            bellTemplate.add(clapper);
+
+            // 3. Fairy Lights (Sparkles) - High Intensity
+            const lightGeo = new THREE.SphereGeometry(0.1, 8, 8);
+            const lightMat = new THREE.MeshBasicMaterial({ color: 0xffffff }); // Pure white core
+            const lightTemplate = new THREE.Mesh(lightGeo, lightMat);
+
+            // 4. Energy Stream (Power Lines)
+            const streamPoints = [];
+            const turns = 6;
+            const streamRadiusBase = CONFIG.treeRadius + 2;
+            for(let j=0; j<=100; j++) {
+                const t = j/100;
+                const angle = t * Math.PI * 2 * turns;
+                const r = (1-t) * streamRadiusBase;
+                const y = t * CONFIG.treeHeight;
+                streamPoints.push(new THREE.Vector3(Math.cos(angle)*r, y, Math.sin(angle)*r));
+            }
+            const streamCurve = new THREE.CatmullRomCurve3(streamPoints);
+            const streamGeo = new THREE.TubeGeometry(streamCurve, 100, 0.08, 8, false);
+            const streamMat = new THREE.MeshBasicMaterial({
+                color: 0xffaa00,
+                transparent: true,
+                opacity: 0.8,
+                blending: THREE.AdditiveBlending
+            });
+            const streamMesh = new THREE.Mesh(streamGeo, streamMat);
+            leavesGroup.add(streamMesh);
+
+            // Helper to place 3D ornaments
+            const placeOrnaments = (template, count, scaleBase, isLight = false) => {
+                for (let i = 0; i < count; i++) {
+                    const ornament = template.clone();
+                    
+                    const t = Math.random(); 
+                    const y = t * CONFIG.treeHeight;
+                    
+                    // Position on surface
+                    const coneRadiusAtHeight = (1 - t) * CONFIG.treeRadius;
+                    const r = coneRadiusAtHeight + (isLight ? 0.2 : 0.8); // Push out more
+                    
+                    const angle = Math.random() * Math.PI * 2;
+
+                    ornament.position.set(
+                        Math.cos(angle) * r,
+                        y,
+                        Math.sin(angle) * r
+                    );
+
+                    if (!isLight) {
+                        // Random rotation (dangle slightly)
+                        ornament.rotation.x = (Math.random() - 0.5) * 0.5;
+                        ornament.rotation.z = (Math.random() - 0.5) * 0.5;
+                        ornament.rotation.y = Math.random() * Math.PI * 2;
+
+                        const s = scaleBase * (0.8 + Math.random() * 0.4);
+                        ornament.scale.set(s, s, s);
+
+                        // Store initial rotation for wind animation
+                        ornament.userData = {
+                            initialRotX: ornament.rotation.x,
+                            initialRotZ: ornament.rotation.z,
+                            swaySpeed: 1.5 + Math.random() * 2, // Random sway speed
+                            swayPhase: Math.random() * Math.PI * 2
+                        };
+                    } else {
+                        // Lights pulse randomly
+                        ornament.userData = {
+                            phase: Math.random() * Math.PI * 2,
+                            speed: 3 + Math.random() * 4 // Faster blinking
+                        };
+                    }
+
+                    ornamentGroup.add(ornament);
+                }
+            };
+
+            placeOrnaments(orangeTemplate, 150, 1.3); // Even more oranges
+            placeOrnaments(bellTemplate, 120, 1.5);   // Even more bells
+            placeOrnaments(lightTemplate, 500, 1.0, true); // Lots of lights
+
+            leavesGroup.add(ornamentGroup);
+
+            // --- C. The Star (Top) ---
+            const starGeo = new THREE.OctahedronGeometry(1.5, 0);
+            const starMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            const star = new THREE.Mesh(starGeo, starMat);
+            star.position.y = CONFIG.treeHeight + 1;
+            
+            // Add a point light to the star
+            const starLight = new THREE.PointLight(0xffffff, 5, 20);
+            star.add(starLight);
+            
+            leavesGroup.add(star);
+
+            // Center the tree vertically on the ground
+            // Ground is at -15 (calculated from -CONFIG.treeHeight / 2 + 5)
+            treeGroup.position.y = -15;
+        }
+
+        function createSnow() {
+            const geometry = new THREE.BufferGeometry();
+            const vertices = [];
+
+            for (let i = 0; i < CONFIG.snowCount; i++) {
+                vertices.push(
+                    Math.random() * 100 - 50, // x
+                    Math.random() * 100 - 20, // y
+                    Math.random() * 100 - 50  // z
+                );
+            }
+
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+
+            const material = new THREE.PointsMaterial({
+                color: 0xffffff,
+                size: 0.4,
+                transparent: true,
+                opacity: 0.8,
+                blending: THREE.AdditiveBlending
+            });
+
+            snowSystem = new THREE.Points(geometry, material);
+            scene.add(snowSystem);
+        }
+
+        function createGround() {
+            // A reflective snowy ground (Dark Ice)
+            const geometry = new THREE.PlaneGeometry(200, 200);
+            const material = new THREE.MeshStandardMaterial({
+                color: 0x050505, // Very dark base
+                roughness: 0.1,  // Smooth
+                metalness: 0.8,  // Metallic/Reflective
+                envMapIntensity: 1
+            });
+            const plane = new THREE.Mesh(geometry, material);
+            plane.rotation.x = -Math.PI / 2;
+            plane.position.y = -CONFIG.treeHeight / 2 + 5;
+            scene.add(plane);
+            
+            // Add a subtle grid for "Tron" like feel? No, keep it organic but reflective.
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            labelRenderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+            time += delta;
+
+            controls.update();
+            
+            // Render CSS3D Scene
+            labelRenderer.render(scene, camera);
+
+            // Animate Snow
+            if (snowSystem) {
+                const positions = snowSystem.geometry.attributes.position.array;
+                for (let i = 1; i < positions.length; i += 3) {
+                    // Move down
+                    positions[i] -= 0.1;
+                    
+                    // Reset if too low
+                    if (positions[i] < -20) {
+                        positions[i] = 50;
+                    }
+                }
+                snowSystem.geometry.attributes.position.needsUpdate = true;
+                
+                // Gentle rotation of snow system
+                snowSystem.rotation.y += 0.001;
+            }
+
+            // Animate Ornaments (Gentle floating/bobbing)
+            if (treeGroup) {
+                // Rotate entire tree slowly
+                treeGroup.rotation.y += 0.002;
+                
+                // Animate fairy lights and ornaments
+                // Find the ornament group by name, traversing down from treeGroup
+                const leavesGroup = treeGroup.children[1]; // leavesGroup is the second child
+                const ornamentGroup = leavesGroup ? leavesGroup.getObjectByName('ornamentGroup') : null;
+
+                if (ornamentGroup) {
+                    ornamentGroup.children.forEach(child => {
+                        if (child.userData.phase !== undefined && child.userData.swaySpeed === undefined) {
+                            // It's a light - Strobe effect
+                            const s = 0.5 + Math.sin(time * child.userData.speed + child.userData.phase) * 1.5;
+                            // Clamp scale to avoid negative
+                            const scale = Math.max(0.1, s);
+                            child.scale.set(scale, scale, scale);
+                        } else if (child.userData.swaySpeed !== undefined) {
+                            // It's an ornament (Orange or Bell) - Wind Sway Effect
+                            const windStrength = 0.45; 
+                            // Sway in X and Z axes based on time and random phase
+                            child.rotation.x = child.userData.initialRotX + Math.sin(time * child.userData.swaySpeed + child.userData.swayPhase) * windStrength;
+                            child.rotation.z = child.userData.initialRotZ + Math.cos(time * child.userData.swaySpeed * 0.7 + child.userData.swayPhase) * windStrength;
+                        }
+                    });
+                }
+            }
+
+            // Render with Bloom
+            composer.render();
+        }
+    </script>
+</body>
+</html>
