@@ -28,6 +28,12 @@
 
         /* 3D Text Styles */
         .greeting-3d {
+            position: absolute;
+            top: 25%;
+            right: 15%;
+            z-index: 10;
+            font-size: 60px;
+
             pointer-events: none;
             font-family: 'Great Vibes', cursive;
             color: #ffffff;
@@ -40,6 +46,17 @@
                 0 0 20px #ffaa00,
                 0 0 40px #ff8800;
             animation: pulseText 3s infinite alternate;
+        }
+
+        @media (max-width: 768px) {
+            .greeting-3d {
+                top: 15%;       /* Slightly lower from top */
+                left: 5%;       /* Move to left side */
+                right: auto;    /* Remove full width centering */
+                width: auto;
+                font-size: 32px;
+                text-align: left;
+            }
         }
 
         @keyframes pulseText {
@@ -102,7 +119,7 @@
     <!-- Removed static greeting div -->
     <button id="music-btn">♫</button>
     <audio id="bgm" loop>
-        <source src="./try/music/bgm2.mp3" type="audio/mpeg">
+        <source src="./music/bgm2.mp3" type="audio/mpeg">
         <!-- Fallback if local file fails or doesn't exist -->
         <source src="https://music.163.com/song/media/outer/url?id=4875306.mp3" type="audio/mpeg">
     </audio>
@@ -248,14 +265,8 @@
             const div = document.createElement('div');
             div.className = 'greeting-3d';
             div.innerHTML = 'Journey beyond,<br>rise above,<br>dwell in joy<br><br><span style="font-size: 0.8em">To 杜</span>';
-            div.style.fontSize = '60px'; // Increased size
             
-            // Make it a static overlay (HUD style)
-            div.style.position = 'absolute';
-            div.style.top = '25%';
-            div.style.right = '15%';
-            div.style.zIndex = '10'; // Ensure it's above the canvas
-            
+            // Styles moved to CSS for responsiveness
             document.body.appendChild(div);
         }
 
